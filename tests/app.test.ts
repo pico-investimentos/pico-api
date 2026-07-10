@@ -1,0 +1,92 @@
+import { describe, expect, it } from 'vitest'
+
+import { createApp } from '../src/app.js'
+import type { AppConfig } from '../src/config/env.js'
+
+const testConfig: AppConfig = Object.freeze({
+  nodeEnv: 'test',
+  port: 3000,
+  appOrigins: Object.freeze(['http://localhost:5173']),
+  logLevel: 'silent',
+})
+
+function createTestApp() {
+  return createApp({
+    config: testConfig,
+    now: () => new Date('2026-07-10T12:00:00.000Z'),
+  })
+}
+
+describe('API foundation', () => {
+  it('returns the versioned health check', async () => {
+    const response = await createTestApp().request('/api/v1/health')
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      status: 'ok',
+      service: 'pico-investimentos-api',
+      version: '0.1.0',
+      timestamp: '2026-07-10T12:00:00.000Z',
+    })
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(response.headers.get('x-request-id')).toBeTruthy()
+  })
+
+  it('uses a consistent response for unknown routes', async () => {
+    const response = await createTestApp().request('/api/v1/unknown', {
+      headers: { 'X-Request-Id': 'test-request-id' },
+    })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Recurso não encontrado.',
+        requestId: 'test-request-id',
+      },
+    })
+  })
+
+  it('allows only configured browser origins', async () => {
+    const allowedResponse = await createTestApp().request('/api/v1/health', {
+      headers: { Origin: 'http://localhost:5173' },
+    })
+    const deniedResponse = await createTestApp().request('/api/v1/health', {
+      headers: { Origin: 'https://example.com' },
+    })
+
+    expect(allowedResponse.headers.get('access-control-allow-origin')).toBe(
+      'http://localhost:5173',
+    )
+    expect(allowedResponse.headers.get('access-control-allow-credentials')).toBe('true')
+    expect(deniedResponse.headers.has('access-control-allow-origin')).toBe(false)
+  })
+
+  it('rejects cross-site form submissions', async () => {
+    const response = await createTestApp().request('/api/v1/health', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain',
+        Origin: 'https://example.com',
+        'Sec-Fetch-Site': 'cross-site',
+      },
+      body: 'blocked',
+    })
+
+    expect(response.status).toBe(403)
+  })
+
+  it('limits request bodies to one megabyte', async () => {
+    const response = await createTestApp().request('/api/v1/unknown', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'x'.repeat(1024 * 1024) }),
+    })
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toMatchObject({
+      error: { code: 'PAYLOAD_TOO_LARGE' },
+    })
+  })
+})
