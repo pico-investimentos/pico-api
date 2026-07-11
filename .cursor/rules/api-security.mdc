@@ -1,0 +1,30 @@
+---
+description: Regras obrigatórias de segurança, finanças e auditoria da API
+globs:
+alwaysApply: true
+---
+
+# Segurança é requisito principal
+
+- Trate frontends, IDs, papéis, saldos e permissões recebidos como não confiáveis.
+- Autentique e autorize no servidor em toda operação protegida. Considere papel,
+  recurso e vínculo do usuário com o cliente; ocultar botões não é autorização.
+- Exija MFA para administradores e sessões em cookies `HttpOnly`, `Secure` e com
+  `SameSite` adequado. Não invente criptografia nem fluxo próprio de senhas.
+- Nunca registre tokens, cookies, senhas, CPF, query strings sensíveis, saldos,
+  payloads financeiros ou conteúdo de documentos.
+- Auditoria é append-only e separada de logs técnicos. Registre ator, ação,
+  recurso, resultado, data, request ID e contexto mínimo em ações administrativas.
+- Não use ponto flutuante para dinheiro. Use unidade mínima ou decimal com
+  precisão explícita; persista datas em UTC.
+- Use transações para mudanças compostas e idempotência para operações
+  financeiras, importações, recomendações e jobs repetíveis.
+- Documentos ficam em storage privado. Downloads e uploads usam URLs assinadas,
+  curtas e temporárias após nova verificação de autorização.
+- Mantenha CORS restrito, respostas sensíveis sem cache, limites de payload,
+  rate limit nas rotas críticas e mensagens de erro sem detalhes internos.
+- Trate LGPD, retenção, backup, restauração, rotação de segredos e resposta a
+  incidentes como requisitos de produção, não como melhorias opcionais.
+- Consulte `docs/security.md` antes de implementar autenticação, documentos ou
+  qualquer feature que manipule dados financeiros reais.
+

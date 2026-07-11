@@ -1,0 +1,32 @@
+---
+description: Arquitetura e requisitos funcionais da API da Pico Investimentos
+globs: "**/*.{ts,json,md}"
+alwaysApply: false
+---
+
+# API da Pico Investimentos
+
+- Use Hono e TypeScript, com deploy inicial compatível com Vercel.
+- Preserve o monólito modular. Organize código por domínio em `src/modules`, não
+  em pastas globais de controllers, services e repositories.
+- Quando um módulo crescer, separe `domain`, `application`, `infrastructure` e
+  `http`. Domínio e casos de uso não dependem de Hono, Vercel, ORM ou SDK externo.
+- Mantenha handlers finos: validar e traduzir HTTP, chamar um caso de uso e
+  serializar a resposta. Regras de negócio não ficam nas rotas.
+- Versione contratos públicos sob `/api/v1`, valide toda entrada na borda e use
+  o formato de erro `{ error: { code, message, requestId } }`.
+- Preserve os módulos previstos: identidade, clientes, perfil de investidor,
+  carteiras, recomendações, documentos, solicitações de serviço, auditoria,
+  notificações e integração B3.
+- Mantenha banco, storage, e-mail, B3 e demais provedores atrás de interfaces.
+  Não acople regras de negócio ao SDK escolhido.
+- PostgreSQL é o banco transacional recomendado. Escolha ORM e provedor somente
+  junto do primeiro modelo real, considerando pooling serverless e região.
+- A sincronização B3 deve rodar diariamente às 23:05 em
+  `America/Sao_Paulo`. Ela deve ser idempotente, possuir lock, histórico de
+  execução, reprocessamento e autenticação do disparo agendado.
+- Envio de e-mail deve ser abstraído para permitir troca de provedor.
+- Atualize `docs/architecture.md`, `.env.example` e testes quando um contrato ou
+  decisão arquitetural mudar.
+- Antes de concluir uma alteração, execute typecheck, lint, testes e build.
+
