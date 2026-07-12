@@ -7,6 +7,7 @@ import { secureHeaders } from 'hono/secure-headers'
 
 import { createApiRoutes } from './api.js'
 import { loadConfig, type AppConfig } from './config/env.js'
+import { createAppServices, type AppServices } from './shared/app-services.js'
 import type { AppBindings } from './shared/http/app-bindings.js'
 import {
   createErrorPayload,
@@ -18,6 +19,7 @@ import { accessLog } from './shared/observability/access-log.js'
 type CreateAppOptions = {
   config?: AppConfig
   now?: () => Date
+  services?: AppServices
 }
 
 const MAX_JSON_BODY_SIZE = 1024 * 1024
@@ -25,6 +27,10 @@ const MAX_JSON_BODY_SIZE = 1024 * 1024
 export function createApp(options: CreateAppOptions = {}) {
   const config = options.config ?? loadConfig()
   const now = options.now ?? (() => new Date())
+  const services = createAppServices({
+    config,
+    ...(options.services ? { services: options.services } : {}),
+  })
   const baseApp = new Hono<AppBindings>()
 
   baseApp.use('*', requestId({ limitLength: 64 }))
@@ -39,7 +45,13 @@ export function createApp(options: CreateAppOptions = {}) {
     cors({
       origin: (origin) => (config.appOrigins.includes(origin) ? origin : undefined),
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Authorization', 'Content-Type', 'X-CSRF-Token', 'X-Request-Id'],
+      allowHeaders: [
+        'Authorization',
+        'Content-Type',
+        'X-CSRF-Token',
+        'X-Request-Id',
+        'Idempotency-Key',
+      ],
       exposeHeaders: ['X-Request-Id'],
       credentials: true,
       maxAge: 600,
@@ -84,7 +96,7 @@ export function createApp(options: CreateAppOptions = {}) {
         version: '0.1.0',
       }),
     )
-    .route('/api/v1', createApiRoutes({ now }))
+    .route('/api/v1', createApiRoutes({ config, now, services }))
 
   app.notFound(notFoundResponse)
   app.onError((error, c) => errorResponse(error, c, config))

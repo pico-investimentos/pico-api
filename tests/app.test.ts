@@ -2,18 +2,29 @@ import { describe, expect, it } from 'vitest'
 
 import { createApp } from '../src/app.js'
 import type { AppConfig } from '../src/config/env.js'
+import { createMemoryServices } from '../src/shared/app-services.js'
 
-const testConfig: AppConfig = Object.freeze({
+export const testConfig: AppConfig = Object.freeze({
   nodeEnv: 'test',
   port: 3000,
   appOrigins: Object.freeze(['http://localhost:5173']),
   logLevel: 'silent',
+  databaseUrl: 'postgresql://postgres:postgres@127.0.0.1:5432/pico_test',
+  databaseMigrationUrl: 'postgresql://postgres:postgres@127.0.0.1:5432/pico_test',
+  sessionCookieName: 'pico_session',
+  sessionTtlHours: 168,
+  b3: Object.freeze({
+    environment: 'certification',
+    optInUrl: 'https://b3-optin.test.local/authorize',
+    allowedHosts: Object.freeze(['b3-optin.test.local']),
+  }),
 })
 
-function createTestApp() {
+export function createTestApp(services = createMemoryServices(testConfig)) {
   return createApp({
     config: testConfig,
     now: () => new Date('2026-07-10T12:00:00.000Z'),
+    services,
   })
 }
 
