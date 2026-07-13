@@ -12,13 +12,17 @@ coverage/
 !.env.example
 
 # B3 access package secrets (never commit)
+.secrets/b3/certification/
+.secrets/b3/production/
 **/b3-access/**
 **/*_client_id_secret.txt
 **/*_senha_p12.txt
 **/*.p12
 **/*.key
+**/*.cer
 **/link_autorizacao.txt
 **/Link_optin.txt
+!.secrets/b3/README.md
 
 # Logs
 *.log

@@ -16,7 +16,7 @@ persistência Drizzle/PostgreSQL e o passo 1 da integração B3 (início do opt-
 ```bash
 npm install
 cp .env.example .env
-# Preencha DATABASE_URL, DATABASE_MIGRATION_URL e B3_* a partir do pacote
+# Preencha DATABASE_URL / DATABASE_MIGRATION_URL (ou aliases Supabase) e B3_*
 # (B3_OPT_IN_URL = conteúdo de link_autorizacao.txt)
 npm run db:migrate
 npm run db:seed-user

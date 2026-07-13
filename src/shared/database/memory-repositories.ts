@@ -6,8 +6,10 @@ import type {
   AuditRepository,
   B3AuthorizationAttemptRepository,
   B3ConnectionRepository,
+  CreateOrGetAttemptResult,
   TransactionRepositories,
   UnitOfWork,
+  UpsertRequestedResult,
 } from '../../modules/b3/domain/b3-repositories.js'
 import type {
   AuditEventInput,
@@ -87,14 +89,80 @@ export class InMemoryB3ConnectionRepository implements B3ConnectionRepository {
     userId: string
     attemptId: string
     now: Date
-  }): Promise<B3ConnectionRecord> {
+  }): Promise<UpsertRequestedResult> {
     const existing = this.connections.get(input.userId)
+
+    if (existing?.status === 'AUTHORIZED') {
+      return { ok: false, reason: 'ALREADY_AUTHORIZED' }
+    }
+
     const record: B3ConnectionRecord = {
       id: existing?.id ?? randomUUID(),
       userId: input.userId,
       status: 'AUTHORIZATION_REQUESTED',
       latestAttemptId: input.attemptId,
       authorizationRequestedAt: input.now,
+      authorizedAt: existing?.authorizedAt ?? null,
+      revokedAt: existing?.revokedAt ?? null,
+      lastCheckedAt: existing?.lastCheckedAt ?? null,
+    }
+    this.connections.set(input.userId, record)
+    return { ok: true, connection: record }
+  }
+
+  async markAuthorized(input: {
+    userId: string
+    authorizedAt: Date
+    now: Date
+  }): Promise<B3ConnectionRecord> {
+    const existing = this.connections.get(input.userId)
+    const record: B3ConnectionRecord = {
+      id: existing?.id ?? randomUUID(),
+      userId: input.userId,
+      status: 'AUTHORIZED',
+      latestAttemptId: existing?.latestAttemptId ?? null,
+      authorizationRequestedAt: existing?.authorizationRequestedAt ?? null,
+      authorizedAt: input.authorizedAt,
+      revokedAt: null,
+      lastCheckedAt: input.now,
+    }
+    this.connections.set(input.userId, record)
+    return record
+  }
+
+  async markChecked(input: {
+    userId: string
+    now: Date
+  }): Promise<B3ConnectionRecord> {
+    const existing = this.connections.get(input.userId)
+    const record: B3ConnectionRecord = {
+      id: existing?.id ?? randomUUID(),
+      userId: input.userId,
+      status: existing?.status ?? 'NOT_CONNECTED',
+      latestAttemptId: existing?.latestAttemptId ?? null,
+      authorizationRequestedAt: existing?.authorizationRequestedAt ?? null,
+      authorizedAt: existing?.authorizedAt ?? null,
+      revokedAt: existing?.revokedAt ?? null,
+      lastCheckedAt: input.now,
+    }
+    this.connections.set(input.userId, record)
+    return record
+  }
+
+  async markRevoked(input: {
+    userId: string
+    now: Date
+  }): Promise<B3ConnectionRecord> {
+    const existing = this.connections.get(input.userId)
+    const record: B3ConnectionRecord = {
+      id: existing?.id ?? randomUUID(),
+      userId: input.userId,
+      status: 'REVOKED',
+      latestAttemptId: existing?.latestAttemptId ?? null,
+      authorizationRequestedAt: existing?.authorizationRequestedAt ?? null,
+      authorizedAt: existing?.authorizedAt ?? null,
+      revokedAt: input.now,
+      lastCheckedAt: input.now,
     }
     this.connections.set(input.userId, record)
     return record
@@ -119,13 +187,22 @@ export class InMemoryB3AuthorizationAttemptRepository
     )
   }
 
-  async create(input: {
+  async createOrGet(input: {
     userId: string
     idempotencyKeyHash: string
     environment: 'certification' | 'production'
     requestId: string
     now: Date
-  }): Promise<B3AuthorizationAttemptRecord> {
+  }): Promise<CreateOrGetAttemptResult> {
+    const existing = await this.findByIdempotencyKey({
+      userId: input.userId,
+      idempotencyKeyHash: input.idempotencyKeyHash,
+    })
+
+    if (existing) {
+      return { attempt: existing, created: false }
+    }
+
     const attempt: B3AuthorizationAttemptRecord = {
       id: randomUUID(),
       userId: input.userId,
@@ -136,7 +213,7 @@ export class InMemoryB3AuthorizationAttemptRepository
       createdAt: input.now,
     }
     this.attempts.push(attempt)
-    return attempt
+    return { attempt, created: true }
   }
 
   async countRecentByUser(input: { userId: string; since: Date }): Promise<number> {

@@ -7,11 +7,6 @@ import { createIdentityRoutes } from './modules/identity/identity.routes.js'
 import type { AppServices } from './shared/app-services.js'
 import type { AppBindings } from './shared/http/app-bindings.js'
 
-
-
-
-
-
 type ApiDependencies = {
   config: AppConfig
   now: () => Date
@@ -38,6 +33,9 @@ export function createApiRoutes(dependencies: ApiDependencies) {
         now: dependencies.now,
         resolveSession: dependencies.services.resolveSession,
         startB3Authorization: dependencies.services.startB3Authorization,
+        getB3Connection: dependencies.services.getB3Connection,
+        confirmB3Authorization: dependencies.services.confirmB3Authorization,
+        revokeB3Authorization: dependencies.services.revokeB3Authorization,
       }),
     )
 }

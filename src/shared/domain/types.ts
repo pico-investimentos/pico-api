@@ -30,6 +30,9 @@ export type B3ConnectionRecord = Readonly<{
   status: B3ConnectionStatus
   latestAttemptId: string | null
   authorizationRequestedAt: Date | null
+  authorizedAt: Date | null
+  revokedAt: Date | null
+  lastCheckedAt: Date | null
 }>
 
 export type B3AuthorizationAttemptRecord = Readonly<{

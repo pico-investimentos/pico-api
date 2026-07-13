@@ -15,8 +15,13 @@ export const testConfig: AppConfig = Object.freeze({
   sessionTtlHours: 168,
   b3: Object.freeze({
     environment: 'certification',
+    apiBaseUrl: 'https://apib3i-cert.b3.com.br:2443',
     optInUrl: 'https://b3-optin.test.local/authorize',
     allowedHosts: Object.freeze(['b3-optin.test.local']),
+    secretsDir: null,
+    oauthTokenUrl:
+      'https://login.microsoftonline.com/4bee639f-5388-44c7-bbac-cb92a93911e6/oauth2/v2.0/token',
+    oauthScope: '98ddf4b0-f66d-4c96-97ea-9e30306599e7/.default',
   }),
 })
 

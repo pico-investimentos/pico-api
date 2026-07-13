@@ -11,6 +11,8 @@ const rawConfigSchema = z.object({
   LOG_LEVEL: z.enum(['info', 'silent']).default('info'),
   DATABASE_URL: z.string().optional(),
   DATABASE_MIGRATION_URL: z.string().optional(),
+  SUPABASE_POSTGRES_URL: z.string().optional(),
+  SUPABASE_POSTGRES_URL_NON_POOLING: z.string().optional(),
   POSTGRES_URL: z.string().optional(),
   POSTGRES_URL_NON_POOLING: z.string().optional(),
   SESSION_COOKIE_NAME: z.string().trim().min(1).default('pico_session'),
@@ -18,6 +20,10 @@ const rawConfigSchema = z.object({
   B3_ENVIRONMENT: z.enum(['certification', 'production']).optional(),
   B3_OPT_IN_URL: z.string().optional(),
   B3_OPT_IN_ALLOWED_HOSTS: z.string().optional(),
+  B3_API_BASE_URL: z.string().optional(),
+  B3_SECRETS_DIR: z.string().optional(),
+  B3_OAUTH_TOKEN_URL: z.string().optional(),
+  B3_OAUTH_SCOPE: z.string().optional(),
 })
 
 const originSchema = z.string().url().transform((value) => new URL(value).origin)
@@ -26,10 +32,33 @@ const TEST_B3_OPT_IN_URL = 'https://b3-optin.test.local/authorize'
 const TEST_B3_ALLOWED_HOST = 'b3-optin.test.local'
 const TEST_DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:5432/pico_test'
 
+const B3_API_BASE_BY_ENVIRONMENT = {
+  certification: 'https://apib3i-cert.b3.com.br:2443',
+  production: 'https://investidor.b3.com.br:2443',
+} as const
+
+const B3_OAUTH_BY_ENVIRONMENT = {
+  certification: {
+    // Pacote STVM / Área do Investidor em certificação
+    tokenUrl:
+      'https://login.microsoftonline.com/4bee639f-5388-44c7-bbac-cb92a93911e6/oauth2/v2.0/token',
+    scope: '98ddf4b0-f66d-4c96-97ea-9e30306599e7/.default',
+  },
+  production: {
+    tokenUrl:
+      'https://login.microsoftonline.com/aa5ac705-873b-4afc-a29d-f0adb89ccf5c/oauth2/v2.0/token',
+    scope: 'abae5dfa-65e6-47c1-82ec-a54a8a3213b9/.default',
+  },
+} as const
+
 export type B3Config = Readonly<{
   environment: 'certification' | 'production'
+  apiBaseUrl: string
   optInUrl: string
   allowedHosts: readonly string[]
+  secretsDir: string | null
+  oauthTokenUrl: string
+  oauthScope: string
 }>
 
 export type AppConfig = Readonly<{
@@ -44,15 +73,20 @@ export type AppConfig = Readonly<{
   b3: B3Config
 }>
 
-function resolveDatabaseUrl(
+function resolveRuntimeDatabaseUrl(
   raw: z.infer<typeof rawConfigSchema>,
-  field: 'runtime' | 'migration',
 ): string | undefined {
-  if (field === 'runtime') {
-    return raw.DATABASE_URL ?? raw.POSTGRES_URL
-  }
+  return raw.DATABASE_URL ?? raw.SUPABASE_POSTGRES_URL ?? raw.POSTGRES_URL
+}
 
-  return raw.DATABASE_MIGRATION_URL ?? raw.POSTGRES_URL_NON_POOLING ?? raw.DATABASE_URL ?? raw.POSTGRES_URL
+function resolveMigrationDatabaseUrl(
+  raw: z.infer<typeof rawConfigSchema>,
+): string | undefined {
+  return (
+    raw.DATABASE_MIGRATION_URL ??
+    raw.SUPABASE_POSTGRES_URL_NON_POOLING ??
+    raw.POSTGRES_URL_NON_POOLING
+  )
 }
 
 function parseB3Config(raw: z.infer<typeof rawConfigSchema>): B3Config {
@@ -73,7 +107,7 @@ function parseB3Config(raw: z.infer<typeof rawConfigSchema>): B3Config {
     ...new Set(
       allowedHostsRaw
         .split(',')
-        .map((host) => host.trim())
+        .map((host) => host.trim().toLowerCase())
         .filter(Boolean),
     ),
   ]
@@ -82,14 +116,29 @@ function parseB3Config(raw: z.infer<typeof rawConfigSchema>): B3Config {
     throw new Error('B3_OPT_IN_URL must use HTTPS')
   }
 
-  if (!allowedHosts.includes(optInUrl.hostname)) {
+  if (!allowedHosts.includes(optInUrl.hostname.toLowerCase())) {
     throw new Error('B3_OPT_IN_URL hostname is not allowed')
   }
 
+  const apiBaseUrlRaw =
+    raw.B3_API_BASE_URL ?? B3_API_BASE_BY_ENVIRONMENT[environment]
+  const apiBaseUrl = new URL(apiBaseUrlRaw)
+
+  if (apiBaseUrl.protocol !== 'https:') {
+    throw new Error('B3_API_BASE_URL must use HTTPS')
+  }
+
+  const secretsDir = raw.B3_SECRETS_DIR?.trim() || null
+  const oauthDefaults = B3_OAUTH_BY_ENVIRONMENT[environment]
+
   return Object.freeze({
     environment,
+    apiBaseUrl: apiBaseUrl.origin,
     optInUrl: optInUrl.toString(),
     allowedHosts: Object.freeze(allowedHosts),
+    secretsDir,
+    oauthTokenUrl: raw.B3_OAUTH_TOKEN_URL?.trim() || oauthDefaults.tokenUrl,
+    oauthScope: raw.B3_OAUTH_SCOPE?.trim() || oauthDefaults.scope,
   })
 }
 
@@ -104,16 +153,20 @@ export function loadConfig(
 
   const isTest = rawConfig.NODE_ENV === 'test'
   const databaseUrl =
-    resolveDatabaseUrl(rawConfig, 'runtime') ?? (isTest ? TEST_DATABASE_URL : undefined)
+    resolveRuntimeDatabaseUrl(rawConfig) ?? (isTest ? TEST_DATABASE_URL : undefined)
   const databaseMigrationUrl =
-    resolveDatabaseUrl(rawConfig, 'migration') ?? (isTest ? TEST_DATABASE_URL : undefined)
+    resolveMigrationDatabaseUrl(rawConfig) ?? (isTest ? TEST_DATABASE_URL : undefined)
 
   if (!databaseUrl) {
-    throw new Error('DATABASE_URL (or POSTGRES_URL) is required')
+    throw new Error(
+      'DATABASE_URL (or SUPABASE_POSTGRES_URL / POSTGRES_URL) is required',
+    )
   }
 
   if (!databaseMigrationUrl) {
-    throw new Error('DATABASE_MIGRATION_URL (or POSTGRES_URL_NON_POOLING) is required')
+    throw new Error(
+      'DATABASE_MIGRATION_URL (or SUPABASE_POSTGRES_URL_NON_POOLING / POSTGRES_URL_NON_POOLING) is required',
+    )
   }
 
   return Object.freeze({

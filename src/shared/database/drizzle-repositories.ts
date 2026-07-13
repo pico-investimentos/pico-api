@@ -1,4 +1,4 @@
-import { and, count, eq, gte, lt } from 'drizzle-orm'
+import { and, count, eq, gte, lt, ne } from 'drizzle-orm'
 
 import type { Database, DbExecutor } from './client.js'
 import type {
@@ -14,8 +14,10 @@ import type {
   AuditRepository,
   B3AuthorizationAttemptRepository,
   B3ConnectionRepository,
+  CreateOrGetAttemptResult,
   TransactionRepositories,
   UnitOfWork,
+  UpsertRequestedResult,
 } from '../../modules/b3/domain/b3-repositories.js'
 import {
   auditLogs,
@@ -26,6 +28,15 @@ import {
 } from './schema/index.js'
 
 type DbClient = DbExecutor
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === '23505'
+  )
+}
 
 function mapUser(row: typeof users.$inferSelect): UserRecord {
   return {
@@ -53,6 +64,9 @@ function mapConnection(row: typeof b3Connections.$inferSelect): B3ConnectionReco
     status: row.status,
     latestAttemptId: row.latestAttemptId,
     authorizationRequestedAt: row.authorizationRequestedAt,
+    authorizedAt: row.authorizedAt,
+    revokedAt: row.revokedAt,
+    lastCheckedAt: row.lastCheckedAt,
   }
 }
 
@@ -146,8 +160,12 @@ export class DrizzleB3ConnectionRepository implements B3ConnectionRepository {
     userId: string
     attemptId: string
     now: Date
-  }): Promise<B3ConnectionRecord> {
+  }): Promise<UpsertRequestedResult> {
     const existing = await this.findByUserId(input.userId)
+
+    if (existing?.status === 'AUTHORIZED') {
+      return { ok: false, reason: 'ALREADY_AUTHORIZED' }
+    }
 
     if (existing) {
       const [row] = await this.db
@@ -158,11 +176,88 @@ export class DrizzleB3ConnectionRepository implements B3ConnectionRepository {
           authorizationRequestedAt: input.now,
           updatedAt: input.now,
         })
+        .where(
+          and(
+            eq(b3Connections.userId, input.userId),
+            ne(b3Connections.status, 'AUTHORIZED'),
+          ),
+        )
+        .returning()
+
+      if (!row) {
+        return { ok: false, reason: 'ALREADY_AUTHORIZED' }
+      }
+
+      return { ok: true, connection: mapConnection(row) }
+    }
+
+    try {
+      const [row] = await this.db
+        .insert(b3Connections)
+        .values({
+          userId: input.userId,
+          status: 'AUTHORIZATION_REQUESTED',
+          latestAttemptId: input.attemptId,
+          authorizationRequestedAt: input.now,
+        })
+        .returning()
+
+      if (!row) {
+        throw new Error('Failed to create B3 connection')
+      }
+
+      return { ok: true, connection: mapConnection(row) }
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error
+      }
+
+      const [row] = await this.db
+        .update(b3Connections)
+        .set({
+          status: 'AUTHORIZATION_REQUESTED',
+          latestAttemptId: input.attemptId,
+          authorizationRequestedAt: input.now,
+          updatedAt: input.now,
+        })
+        .where(
+          and(
+            eq(b3Connections.userId, input.userId),
+            ne(b3Connections.status, 'AUTHORIZED'),
+          ),
+        )
+        .returning()
+
+      if (!row) {
+        return { ok: false, reason: 'ALREADY_AUTHORIZED' }
+      }
+
+      return { ok: true, connection: mapConnection(row) }
+    }
+  }
+
+  async markAuthorized(input: {
+    userId: string
+    authorizedAt: Date
+    now: Date
+  }): Promise<B3ConnectionRecord> {
+    const existing = await this.findByUserId(input.userId)
+
+    if (existing) {
+      const [row] = await this.db
+        .update(b3Connections)
+        .set({
+          status: 'AUTHORIZED',
+          authorizedAt: input.authorizedAt,
+          revokedAt: null,
+          lastCheckedAt: input.now,
+          updatedAt: input.now,
+        })
         .where(eq(b3Connections.userId, input.userId))
         .returning()
 
       if (!row) {
-        throw new Error('Failed to update B3 connection')
+        throw new Error('Failed to mark B3 connection as authorized')
       }
 
       return mapConnection(row)
@@ -172,14 +267,95 @@ export class DrizzleB3ConnectionRepository implements B3ConnectionRepository {
       .insert(b3Connections)
       .values({
         userId: input.userId,
-        status: 'AUTHORIZATION_REQUESTED',
-        latestAttemptId: input.attemptId,
-        authorizationRequestedAt: input.now,
+        status: 'AUTHORIZED',
+        authorizedAt: input.authorizedAt,
+        lastCheckedAt: input.now,
       })
       .returning()
 
     if (!row) {
-      throw new Error('Failed to create B3 connection')
+      throw new Error('Failed to create authorized B3 connection')
+    }
+
+    return mapConnection(row)
+  }
+
+  async markChecked(input: {
+    userId: string
+    now: Date
+  }): Promise<B3ConnectionRecord> {
+    const existing = await this.findByUserId(input.userId)
+
+    if (existing) {
+      const [row] = await this.db
+        .update(b3Connections)
+        .set({
+          lastCheckedAt: input.now,
+          updatedAt: input.now,
+        })
+        .where(eq(b3Connections.userId, input.userId))
+        .returning()
+
+      if (!row) {
+        throw new Error('Failed to update B3 connection check timestamp')
+      }
+
+      return mapConnection(row)
+    }
+
+    const [row] = await this.db
+      .insert(b3Connections)
+      .values({
+        userId: input.userId,
+        status: 'NOT_CONNECTED',
+        lastCheckedAt: input.now,
+      })
+      .returning()
+
+    if (!row) {
+      throw new Error('Failed to create B3 connection check record')
+    }
+
+    return mapConnection(row)
+  }
+
+  async markRevoked(input: {
+    userId: string
+    now: Date
+  }): Promise<B3ConnectionRecord> {
+    const existing = await this.findByUserId(input.userId)
+
+    if (existing) {
+      const [row] = await this.db
+        .update(b3Connections)
+        .set({
+          status: 'REVOKED',
+          revokedAt: input.now,
+          lastCheckedAt: input.now,
+          updatedAt: input.now,
+        })
+        .where(eq(b3Connections.userId, input.userId))
+        .returning()
+
+      if (!row) {
+        throw new Error('Failed to mark B3 connection as revoked')
+      }
+
+      return mapConnection(row)
+    }
+
+    const [row] = await this.db
+      .insert(b3Connections)
+      .values({
+        userId: input.userId,
+        status: 'REVOKED',
+        revokedAt: input.now,
+        lastCheckedAt: input.now,
+      })
+      .returning()
+
+    if (!row) {
+      throw new Error('Failed to create revoked B3 connection')
     }
 
     return mapConnection(row)
@@ -209,31 +385,48 @@ export class DrizzleB3AuthorizationAttemptRepository
     return row ? mapAttempt(row) : null
   }
 
-  async create(input: {
+  async createOrGet(input: {
     userId: string
     idempotencyKeyHash: string
     environment: 'certification' | 'production'
     requestId: string
     now: Date
-  }): Promise<B3AuthorizationAttemptRecord> {
-    const [row] = await this.db
-      .insert(b3AuthorizationAttempts)
-      .values({
+  }): Promise<CreateOrGetAttemptResult> {
+    try {
+      const [row] = await this.db
+        .insert(b3AuthorizationAttempts)
+        .values({
+          userId: input.userId,
+          idempotencyKeyHash: input.idempotencyKeyHash,
+          environment: input.environment,
+          status: 'AUTHORIZATION_REQUESTED',
+          requestId: input.requestId,
+          createdAt: input.now,
+          updatedAt: input.now,
+        })
+        .returning()
+
+      if (!row) {
+        throw new Error('Failed to create B3 authorization attempt')
+      }
+
+      return { attempt: mapAttempt(row), created: true }
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error
+      }
+
+      const existing = await this.findByIdempotencyKey({
         userId: input.userId,
         idempotencyKeyHash: input.idempotencyKeyHash,
-        environment: input.environment,
-        status: 'AUTHORIZATION_REQUESTED',
-        requestId: input.requestId,
-        createdAt: input.now,
-        updatedAt: input.now,
       })
-      .returning()
 
-    if (!row) {
-      throw new Error('Failed to create B3 authorization attempt')
+      if (!existing) {
+        throw error
+      }
+
+      return { attempt: existing, created: false }
     }
-
-    return mapAttempt(row)
   }
 
   async countRecentByUser(input: { userId: string; since: Date }): Promise<number> {
