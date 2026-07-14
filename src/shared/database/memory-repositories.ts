@@ -224,10 +224,23 @@ export class InMemoryB3AuthorizationAttemptRepository
 }
 
 export class InMemoryAuditRepository implements AuditRepository {
-  readonly events: AuditEventInput[] = []
+  readonly events: Array<AuditEventInput & { createdAt: Date }> = []
 
   async record(event: AuditEventInput): Promise<void> {
-    this.events.push(event)
+    this.events.push({ ...event, createdAt: new Date() })
+  }
+
+  async countRecentByActor(input: {
+    actorId: string
+    actions: readonly string[]
+    since: Date
+  }): Promise<number> {
+    return this.events.filter(
+      (event) =>
+        event.actorId === input.actorId &&
+        input.actions.includes(event.action) &&
+        event.createdAt >= input.since,
+    ).length
   }
 }
 

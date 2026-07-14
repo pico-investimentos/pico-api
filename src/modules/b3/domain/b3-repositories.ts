@@ -52,6 +52,11 @@ export interface B3AuthorizationAttemptRepository {
 
 export interface AuditRepository {
   record(event: AuditEventInput): Promise<void>
+  countRecentByActor(input: {
+    actorId: string
+    actions: readonly string[]
+    since: Date
+  }): Promise<number>
 }
 
 export interface UnitOfWork {

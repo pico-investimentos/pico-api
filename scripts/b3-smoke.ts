@@ -5,7 +5,9 @@ import { normalizeCpf } from '../src/shared/crypto/security.js'
 import {
   HttpB3InvestorAuthorizationClient,
 } from '../src/modules/b3/infrastructure/b3-investor-authorization-client.js'
-import { loadB3AccessSecrets } from '../src/modules/b3/infrastructure/load-b3-secrets.js'
+import {
+  resolveB3AccessSecrets,
+} from '../src/modules/b3/infrastructure/load-b3-secrets.js'
 
 try {
   loadEnvFile('.env')
@@ -22,13 +24,15 @@ function readCpfArg(argv: string[]): string | null {
 
 async function main() {
   const config = loadConfig()
+  const secrets = resolveB3AccessSecrets({ secretsDir: config.b3.secretsDir })
 
-  if (!config.b3.secretsDir) {
-    throw new Error('B3_SECRETS_DIR is required for b3:smoke')
+  if (!secrets) {
+    throw new Error(
+      'B3 secrets required: set B3_SECRETS_DIR or B3_CLIENT_ID + B3_CLIENT_SECRET + B3_MTLS_*_PEM_BASE64',
+    )
   }
 
   const cpf = readCpfArg(process.argv.slice(2))
-  const secrets = loadB3AccessSecrets(config.b3.secretsDir)
   const client = new HttpB3InvestorAuthorizationClient(config.b3, secrets)
 
   console.log(

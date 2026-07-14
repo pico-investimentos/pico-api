@@ -12,6 +12,10 @@ import type { GetB3ConnectionOutput } from './get-b3-connection.js'
 
 export type RevokeB3AuthorizationOutput = GetB3ConnectionOutput
 
+const MAX_REVOCATIONS = 3
+const REVOCATION_WINDOW_MS = 15 * 60 * 1000
+const REVOCATION_ACTIONS = ['B3_AUTHORIZATION_REVOKED'] as const
+
 export class RevokeB3Authorization {
   constructor(
     private readonly users: UserRepository,
@@ -49,6 +53,36 @@ export class RevokeB3Authorization {
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Senha incorreta.')
     }
 
+    const recentRevocations = await this.unitOfWork.runInTransaction(async (repos) => {
+      return repos.audit.countRecentByActor({
+        actorId: user.id,
+        actions: REVOCATION_ACTIONS,
+        since: new Date(now.getTime() - REVOCATION_WINDOW_MS),
+      })
+    })
+
+    if (recentRevocations >= MAX_REVOCATIONS) {
+      await this.unitOfWork.runInTransaction(async (repos) => {
+        await repos.audit.record({
+          action: 'B3_AUTHORIZATION_REVOCATION_REJECTED',
+          actorType: 'USER',
+          actorId: user.id,
+          targetType: 'B3_CONNECTION',
+          targetId: user.id,
+          requestId: input.requestId,
+          metadata: {
+            environment: this.config.environment,
+            reason: 'TOO_MANY_REVOCATIONS',
+          },
+        })
+      })
+      throw new AppError(
+        429,
+        'TOO_MANY_REVOCATIONS',
+        'Muitas tentativas de revogação. Tente novamente em alguns minutos.',
+      )
+    }
+
     const existing = await this.unitOfWork.runInTransaction(async (repos) => {
       return repos.connections.findByUserId(user.id)
     })
@@ -59,10 +93,6 @@ export class RevokeB3Authorization {
         'B3_NOT_REVOCABLE',
         'Não há autorização B3 ativa para revogar.',
       )
-    }
-
-    if (existing.status === 'REVOKED') {
-      throw new AppError(409, 'B3_ALREADY_REVOKED', 'A autorização B3 já está revogada.')
     }
 
     try {

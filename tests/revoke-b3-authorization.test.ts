@@ -91,6 +91,38 @@ describe('RevokeB3Authorization', () => {
     expect((await connections.findByUserId(userId))?.status).toBe('AUTHORIZED')
     expect((await b3Client.findAuthorizationsByDocument(cpf)).authorizedInvestors).toHaveLength(1)
   })
+
+  it('rate-limits revocations after 3 attempts in 15 minutes', async () => {
+    const { revoke, audit } = await createAuthorizedFixture(true)
+
+    for (let index = 0; index < 3; index += 1) {
+      await audit.record({
+        action: 'B3_AUTHORIZATION_REVOKED',
+        actorType: 'USER',
+        actorId: userId,
+        targetType: 'B3_CONNECTION',
+        targetId: userId,
+        requestId: `seed_revoke_${index}`,
+        metadata: {},
+      })
+    }
+
+    await expect(
+      revoke.execute({
+        userId,
+        password,
+        requestId: 'req_revoke_limit',
+        now,
+      }),
+    ).rejects.toMatchObject({
+      status: 429,
+      code: 'TOO_MANY_REVOCATIONS',
+    })
+
+    expect(
+      audit.events.some((event) => event.action === 'B3_AUTHORIZATION_REVOCATION_REJECTED'),
+    ).toBe(true)
+  })
 })
 
 describe('ConfirmB3Authorization possiblyRevoked', () => {

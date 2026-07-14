@@ -12,6 +12,14 @@ export type ConfirmB3AuthorizationOutput = GetB3ConnectionOutput & {
   possiblyRevoked: boolean
 }
 
+const MAX_CONFIRMATIONS = 20
+const CONFIRMATION_WINDOW_MS = 15 * 60 * 1000
+const CONFIRMATION_ACTIONS = [
+  'B3_AUTHORIZATION_CONFIRMED',
+  'B3_AUTHORIZATION_CONFIRMATION_PENDING',
+  'B3_AUTHORIZATION_POSSIBLY_REVOKED',
+] as const
+
 export class ConfirmB3Authorization {
   constructor(
     private readonly users: UserRepository,
@@ -40,6 +48,36 @@ export class ConfirmB3Authorization {
 
     if (!isValidCpf(cpf)) {
       throw new AppError(422, 'CPF_INVALID', 'O CPF cadastrado é inválido.')
+    }
+
+    const recentConfirmations = await this.unitOfWork.runInTransaction(async (repos) => {
+      return repos.audit.countRecentByActor({
+        actorId: user.id,
+        actions: CONFIRMATION_ACTIONS,
+        since: new Date(now.getTime() - CONFIRMATION_WINDOW_MS),
+      })
+    })
+
+    if (recentConfirmations >= MAX_CONFIRMATIONS) {
+      await this.unitOfWork.runInTransaction(async (repos) => {
+        await repos.audit.record({
+          action: 'B3_AUTHORIZATION_CONFIRMATION_REJECTED',
+          actorType: 'USER',
+          actorId: user.id,
+          targetType: 'B3_CONNECTION',
+          targetId: user.id,
+          requestId: input.requestId,
+          metadata: {
+            environment: this.config.environment,
+            reason: 'TOO_MANY_CONFIRMATIONS',
+          },
+        })
+      })
+      throw new AppError(
+        429,
+        'TOO_MANY_CONFIRMATIONS',
+        'Muitas atualizações de status. Tente novamente em alguns minutos.',
+      )
     }
 
     let lookup

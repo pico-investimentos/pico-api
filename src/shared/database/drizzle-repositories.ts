@@ -1,4 +1,4 @@
-import { and, count, eq, gte, lt, ne } from 'drizzle-orm'
+import { and, count, eq, gte, inArray, lt, ne } from 'drizzle-orm'
 
 import type { Database, DbExecutor } from './client.js'
 import type {
@@ -457,6 +457,29 @@ export class DrizzleAuditRepository implements AuditRepository {
       requestId: event.requestId,
       metadata: event.metadata ?? {},
     })
+  }
+
+  async countRecentByActor(input: {
+    actorId: string
+    actions: readonly string[]
+    since: Date
+  }): Promise<number> {
+    if (input.actions.length === 0) {
+      return 0
+    }
+
+    const [row] = await this.db
+      .select({ value: count() })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.actorId, input.actorId),
+          inArray(auditLogs.action, [...input.actions]),
+          gte(auditLogs.createdAt, input.since),
+        ),
+      )
+
+    return Number(row?.value ?? 0)
   }
 }
 

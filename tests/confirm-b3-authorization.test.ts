@@ -88,4 +88,31 @@ describe('ConfirmB3Authorization', () => {
     })
     expect((await connections.findByUserId(userId))?.lastCheckedAt).toEqual(now)
   })
+
+  it('rate-limits confirmations after 20 attempts in 15 minutes', async () => {
+    const { useCase, audit } = await createUseCase({ authorized: true })
+
+    for (let index = 0; index < 20; index += 1) {
+      await useCase.execute({
+        userId,
+        requestId: `req_confirm_limit_${index}`,
+        now,
+      })
+    }
+
+    await expect(
+      useCase.execute({
+        userId,
+        requestId: 'req_confirm_limit_overflow',
+        now,
+      }),
+    ).rejects.toMatchObject({
+      status: 429,
+      code: 'TOO_MANY_CONFIRMATIONS',
+    })
+
+    expect(
+      audit.events.some((event) => event.action === 'B3_AUTHORIZATION_CONFIRMATION_REJECTED'),
+    ).toBe(true)
+  })
 })

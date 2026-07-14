@@ -20,7 +20,9 @@ import {
   InMemoryB3InvestorAuthorizationClient,
   type B3InvestorAuthorizationClient,
 } from '../modules/b3/infrastructure/b3-investor-authorization-client.js'
-import { loadB3AccessSecrets } from '../modules/b3/infrastructure/load-b3-secrets.js'
+import {
+  resolveB3AccessSecrets,
+} from '../modules/b3/infrastructure/load-b3-secrets.js'
 import { createDatabaseClient } from './database/client.js'
 import {
   DrizzleB3AuthorizationAttemptRepository,
@@ -59,14 +61,19 @@ export function createB3InvestorAuthorizationClient(
   config: AppConfig,
   options?: { authorizedDocuments?: ReadonlySet<string> },
 ): B3InvestorAuthorizationClient {
-  if (config.nodeEnv === 'test' || !config.b3.secretsDir) {
+  if (config.nodeEnv === 'test') {
     return new InMemoryB3InvestorAuthorizationClient(options?.authorizedDocuments)
   }
 
-  return new HttpB3InvestorAuthorizationClient(
-    config.b3,
-    loadB3AccessSecrets(config.b3.secretsDir),
-  )
+  const secrets = resolveB3AccessSecrets({
+    secretsDir: config.b3.secretsDir,
+  })
+
+  if (!secrets) {
+    return new InMemoryB3InvestorAuthorizationClient(options?.authorizedDocuments)
+  }
+
+  return new HttpB3InvestorAuthorizationClient(config.b3, secrets)
 }
 
 function buildUseCases(
