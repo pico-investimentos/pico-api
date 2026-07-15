@@ -15,6 +15,11 @@ export type UpsertRequestedResult =
 
 export interface B3ConnectionRepository {
   findByUserId(userId: string): Promise<B3ConnectionRecord | null>
+  listUserIdsByStatus(input: {
+    status: B3ConnectionRecord['status']
+    afterUserId?: string
+    limit: number
+  }): Promise<readonly string[]>
   upsertRequested(input: {
     userId: string
     attemptId: string

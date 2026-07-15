@@ -3,6 +3,10 @@ import type { AuthenticatedUser, UserRecord } from '../../../shared/domain/types
 export interface UserRepository {
   findById(id: string): Promise<UserRecord | null>
   findByEmail(email: string): Promise<UserRecord | null>
+  updatePasswordHash(input: {
+    id: string
+    passwordHash: string
+  }): Promise<void>
 }
 
 export function toAuthenticatedUser(user: UserRecord): AuthenticatedUser {

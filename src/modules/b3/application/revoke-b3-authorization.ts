@@ -6,6 +6,11 @@ import {
   verifyPassword,
 } from '../../../shared/crypto/security.js'
 import type { UserRepository } from '../../identity/domain/user-repository.js'
+import {
+  createRateLimitKey,
+  enforceRateLimit,
+} from '../../../shared/security/rate-limit.js'
+import type { RateLimitRepository } from '../../../shared/security/rate-limit-repository.js'
 import type { UnitOfWork } from '../domain/b3-repositories.js'
 import type { B3InvestorAuthorizationClient } from '../infrastructure/b3-investor-authorization-client.js'
 import type { GetB3ConnectionOutput } from './get-b3-connection.js'
@@ -15,11 +20,16 @@ export type RevokeB3AuthorizationOutput = GetB3ConnectionOutput
 const MAX_REVOCATIONS = 3
 const REVOCATION_WINDOW_MS = 15 * 60 * 1000
 const REVOCATION_ACTIONS = ['B3_AUTHORIZATION_REVOKED'] as const
+const REVOCATION_PASSWORD_LIMIT = 5
+const REVOCATION_IP_LIMIT = 20
+const REVOCATION_PASSWORD_BLOCK_MS = 30 * 60 * 1000
 
 export class RevokeB3Authorization {
   constructor(
     private readonly users: UserRepository,
     private readonly unitOfWork: UnitOfWork,
+    private readonly rateLimits: RateLimitRepository,
+    private readonly rateLimitKeySecret: string,
     private readonly b3Client: B3InvestorAuthorizationClient,
     private readonly config: B3Config,
   ) {}
@@ -27,10 +37,34 @@ export class RevokeB3Authorization {
   async execute(input: {
     userId: string
     password: string
+    ipAddress: string
     requestId: string
     now?: Date
   }): Promise<RevokeB3AuthorizationOutput> {
     const now = input.now ?? new Date()
+    const accountKey = createRateLimitKey(
+      this.rateLimitKeySecret,
+      'b3-revocation:user',
+      input.userId,
+    )
+    await enforceRateLimit(this.rateLimits, {
+      keyHash: createRateLimitKey(
+        this.rateLimitKeySecret,
+        'b3-revocation:ip',
+        input.ipAddress,
+      ),
+      limit: REVOCATION_IP_LIMIT,
+      windowMs: REVOCATION_WINDOW_MS,
+      blockMs: REVOCATION_PASSWORD_BLOCK_MS,
+      now,
+    })
+    await enforceRateLimit(this.rateLimits, {
+      keyHash: accountKey,
+      limit: REVOCATION_PASSWORD_LIMIT,
+      windowMs: REVOCATION_WINDOW_MS,
+      blockMs: REVOCATION_PASSWORD_BLOCK_MS,
+      now,
+    })
     const user = await this.users.findById(input.userId)
 
     if (!user || !user.isActive) {
@@ -52,6 +86,7 @@ export class RevokeB3Authorization {
     if (!passwordMatches) {
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Senha incorreta.')
     }
+    await this.rateLimits.reset(accountKey)
 
     const recentRevocations = await this.unitOfWork.runInTransaction(async (repos) => {
       return repos.audit.countRecentByActor({

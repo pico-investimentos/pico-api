@@ -1,4 +1,4 @@
-import { and, count, eq, gte, inArray, lt, ne } from 'drizzle-orm'
+import { and, asc, count, eq, gt, gte, inArray, lt, ne } from 'drizzle-orm'
 
 import type { Database, DbExecutor } from './client.js'
 import type {
@@ -100,6 +100,16 @@ export class DrizzleUserRepository implements UserRepository {
       .limit(1)
     return row ? mapUser(row) : null
   }
+
+  async updatePasswordHash(input: {
+    id: string
+    passwordHash: string
+  }): Promise<void> {
+    await this.db
+      .update(users)
+      .set({ passwordHash: input.passwordHash, updatedAt: new Date() })
+      .where(eq(users.id, input.id))
+  }
 }
 
 export class DrizzleSessionRepository implements SessionRepository {
@@ -154,6 +164,28 @@ export class DrizzleB3ConnectionRepository implements B3ConnectionRepository {
       .where(eq(b3Connections.userId, userId))
       .limit(1)
     return row ? mapConnection(row) : null
+  }
+
+  async listUserIdsByStatus(input: {
+    status: B3ConnectionRecord['status']
+    afterUserId?: string
+    limit: number
+  }): Promise<readonly string[]> {
+    const rows = await this.db
+      .select({ userId: b3Connections.userId })
+      .from(b3Connections)
+      .where(
+        and(
+          eq(b3Connections.status, input.status),
+          input.afterUserId
+            ? gt(b3Connections.userId, input.afterUserId)
+            : undefined,
+        ),
+      )
+      .orderBy(asc(b3Connections.userId))
+      .limit(input.limit)
+
+    return Object.freeze(rows.map((row) => row.userId))
   }
 
   async upsertRequested(input: {

@@ -1,12 +1,29 @@
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  scrypt as scryptCallback,
+  timingSafeEqual,
+} from 'node:crypto'
 import { promisify } from 'node:util'
+import { hash as argon2Hash, verify as argon2Verify } from '@node-rs/argon2'
 
 const scrypt = promisify(scryptCallback)
 
 const SCRYPT_KEYLEN = 64
+const ARGON2_OPTIONS = {
+  memoryCost: 19_456,
+  timeCost: 2,
+  parallelism: 1,
+  outputLen: 32,
+} as const
 
 export function hashSha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
+}
+
+export function hashHmacSha256(secret: string, value: string): string {
+  return createHmac('sha256', secret).update(value).digest('hex')
 }
 
 export function createSessionToken(): string {
@@ -14,12 +31,29 @@ export function createSessionToken(): string {
 }
 
 export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString('hex')
-  const derived = (await scrypt(password, salt, SCRYPT_KEYLEN)) as Buffer
-  return `${salt}:${derived.toString('hex')}`
+  return argon2Hash(password, ARGON2_OPTIONS)
 }
 
 export async function verifyPassword(password: string, passwordHash: string): Promise<boolean> {
+  if (passwordHash.startsWith('$argon2')) {
+    return argon2Verify(passwordHash, password)
+  }
+
+  return verifyLegacyScryptPassword(password, passwordHash)
+}
+
+export function needsPasswordRehash(passwordHash: string): boolean {
+  return !passwordHash.startsWith('$argon2id$')
+}
+
+/**
+ * Migration-only verifier for hashes created before Argon2 adoption.
+ * Successful logins replace this format through `needsPasswordRehash`.
+ */
+async function verifyLegacyScryptPassword(
+  password: string,
+  passwordHash: string,
+): Promise<boolean> {
   const [salt, hash] = passwordHash.split(':')
 
   if (!salt || !hash) {

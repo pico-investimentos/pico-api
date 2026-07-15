@@ -8,6 +8,34 @@
       "when": 1783839531762,
       "tag": "0000_init_identity_b3",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784117359678,
+      "tag": "0001_deep_elektra",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784117819266,
+      "tag": "0002_open_quicksilver",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784132283821,
+      "tag": "0003_known_vulcan",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784133236597,
+      "tag": "0004_wet_fantastic_four",
+      "breakpoints": true
     }
   ]
 }

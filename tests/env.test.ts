@@ -87,6 +87,7 @@ describe('environment configuration', () => {
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
       DATABASE_MIGRATION_URL: 'postgresql://user:pass@localhost:5432/db',
+      RATE_LIMIT_KEY_SECRET: 'test-rate-limit-key-secret-123456789',
       B3_ENVIRONMENT: 'production',
       B3_OPT_IN_URL: 'https://b3investidor.b2clogin.com/authorize',
       B3_OPT_IN_ALLOWED_HOSTS: 'b3investidor.b2clogin.com',
@@ -99,5 +100,40 @@ describe('environment configuration', () => {
     expect(production.b3.apiBaseUrl).toBe('https://investidor.b3.com.br:2443')
     expect(production.b3.secretsDir).toBe('.secrets/b3/production')
     expect(production.b3.oauthScope).toContain('abae5dfa')
+  })
+
+  it('requires a rate-limit HMAC secret in production', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
+        DATABASE_MIGRATION_URL: 'postgresql://user:pass@localhost:5432/db',
+      }),
+    ).toThrow(/RATE_LIMIT_KEY_SECRET/)
+  })
+
+  it('rejects a placeholder rate-limit secret in production', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
+        DATABASE_MIGRATION_URL: 'postgresql://user:pass@localhost:5432/db',
+        RATE_LIMIT_KEY_SECRET: 'change-me-with-at-least-32-random-characters',
+      }),
+    ).toThrow(/placeholder/)
+  })
+
+  it('defaults B3 HTTP timeout and in-memory allow flag', () => {
+    const config = loadConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
+      DATABASE_MIGRATION_URL: 'postgresql://user:pass@localhost:5432/db',
+      B3_ENVIRONMENT: 'certification',
+      B3_OPT_IN_URL: 'https://optin.b3.example/authorize',
+      B3_OPT_IN_ALLOWED_HOSTS: 'optin.b3.example',
+    })
+
+    expect(config.b3.httpTimeoutMs).toBe(30_000)
+    expect(config.b3.allowInMemory).toBe(false)
   })
 })

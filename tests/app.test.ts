@@ -13,6 +13,8 @@ export const testConfig: AppConfig = Object.freeze({
   databaseMigrationUrl: 'postgresql://postgres:postgres@127.0.0.1:5432/pico_test',
   sessionCookieName: 'pico_session',
   sessionTtlHours: 168,
+  rateLimitKeySecret: 'test-rate-limit-key-secret-123456789',
+  cronSecret: 'test-cron-secret',
   b3: Object.freeze({
     environment: 'certification',
     apiBaseUrl: 'https://apib3i-cert.b3.com.br:2443',
@@ -22,6 +24,8 @@ export const testConfig: AppConfig = Object.freeze({
     oauthTokenUrl:
       'https://login.microsoftonline.com/4bee639f-5388-44c7-bbac-cb92a93911e6/oauth2/v2.0/token',
     oauthScope: '98ddf4b0-f66d-4c96-97ea-9e30306599e7/.default',
+    httpTimeoutMs: 30_000,
+    allowInMemory: false,
   }),
 })
 
@@ -103,6 +107,63 @@ describe('API foundation', () => {
     expect(response.status).toBe(413)
     expect(await response.json()).toMatchObject({
       error: { code: 'PAYLOAD_TOO_LARGE' },
+    })
+  })
+
+  it('accepts authenticated Vercel Cron GET requests', async () => {
+    const response = await createTestApp().request(
+      '/api/v1/internal/b3/daily-position-sync',
+      {
+        headers: { Authorization: `Bearer ${testConfig.cronSecret}` },
+      },
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      data: {
+        lastLoadedDate: '2026-07-14',
+        dispatchId: expect.any(String),
+        status: 'PENDING',
+        reused: false,
+      },
+    })
+  })
+
+  it('rejects unauthenticated cron requests', async () => {
+    const response = await createTestApp().request(
+      '/api/v1/internal/b3/daily-position-sync',
+    )
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toMatchObject({
+      error: { code: 'UNAUTHENTICATED' },
+    })
+  })
+
+  it('processes an empty queue through the authenticated worker route', async () => {
+    const response = await createTestApp().request(
+      '/api/v1/internal/b3/process-position-syncs',
+      {
+        headers: { Authorization: `Bearer ${testConfig.cronSecret}` },
+      },
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        dispatch: {
+          dispatchId: null,
+          scanned: 0,
+          enqueued: 0,
+          reused: 0,
+          skipped: 0,
+          completed: true,
+          errorCode: null,
+        },
+        recoveredStale: 0,
+        claimed: 0,
+        results: [],
+      },
     })
   })
 })

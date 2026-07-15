@@ -5,6 +5,7 @@ import { normalizeCpf } from '../src/shared/crypto/security.js'
 import {
   HttpB3InvestorAuthorizationClient,
 } from '../src/modules/b3/infrastructure/b3-investor-authorization-client.js'
+import { createB3HttpStack } from '../src/modules/b3/infrastructure/create-b3-http-stack.js'
 import {
   resolveB3AccessSecrets,
 } from '../src/modules/b3/infrastructure/load-b3-secrets.js'
@@ -33,7 +34,8 @@ async function main() {
   }
 
   const cpf = readCpfArg(process.argv.slice(2))
-  const client = new HttpB3InvestorAuthorizationClient(config.b3, secrets)
+  const stack = createB3HttpStack(config.b3, secrets)
+  const client = new HttpB3InvestorAuthorizationClient(config.b3, stack)
 
   console.log(
     JSON.stringify({

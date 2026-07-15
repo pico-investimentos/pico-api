@@ -36,6 +36,12 @@ export function createApiRoutes(dependencies: ApiDependencies) {
         getB3Connection: dependencies.services.getB3Connection,
         confirmB3Authorization: dependencies.services.confirmB3Authorization,
         revokeB3Authorization: dependencies.services.revokeB3Authorization,
+        syncB3InvestorPositions: dependencies.services.syncB3InvestorPositions,
+        getB3SyncStatus: dependencies.services.getB3SyncStatus,
+        listPortfolioPositions: dependencies.services.listPortfolioPositions,
+        runDailyB3PositionSync: dependencies.services.runDailyB3PositionSync,
+        processPendingB3PositionSyncs:
+          dependencies.services.processPendingB3PositionSyncs,
       }),
     )
 }

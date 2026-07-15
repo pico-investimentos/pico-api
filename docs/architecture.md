@@ -48,8 +48,8 @@ domínio não importa Hono, banco de dados, Vercel nem SDKs externos.
 | notifications | e-mails e outras notificações |
 | b3 | importação e reconciliação dos dados da B3 |
 
-O único módulo implementado nesta fundação é `health`. Os demais entram com a
-primeira entrega real de cada domínio, evitando pastas vazias e contratos
+Os módulos ativos são `identity`, `b3` e a fundação `health`. Os demais entram
+com a primeira entrega real de cada domínio, evitando pastas vazias e contratos
 fictícios.
 
 ## Contratos HTTP
@@ -63,9 +63,8 @@ fictícios.
 
 ## Persistência
 
-PostgreSQL é o banco recomendado para os dados transacionais. O ORM e o provedor
-serão escolhidos junto do primeiro modelo de domínio, considerando pooling
-serverless e a região do deploy.
+PostgreSQL é o banco transacional e Drizzle é o ORM. A conexão usa o pooler do
+provedor em runtime; migrations usam a URL direta configurada separadamente.
 
 - Dinheiro nunca usa ponto flutuante; valores usam unidade mínima ou decimal de
   precisão explícita.
@@ -82,10 +81,16 @@ por URL assinada; o limite global da API permanece pequeno.
 
 ## Integração B3
 
-O agendamento diário das 23:05 em `America/Sao_Paulo` apenas dispara um caso de
-uso. A sincronização precisa ser idempotente, registrar execução, aplicar lock
-distribuído e permitir reprocessamento. Antes de configurar o cron da Vercel, o
-horário deve ser convertido para UTC e protegido por `CRON_SECRET`.
+O agendamento diário das 23:05 em `America/Sao_Paulo` consulta
+`last-load-update` e cria um despacho paginado apenas para referências novas.
+O worker toma um lease do despacho, avança seu cursor durável por compare-and-set
+e cria Corridas `PENDING`, limitadas por hash do CPF, ambiente, tipo e dia de
+negócio. Uma referência mais nova substitui um despacho incompleto antigo. O
+botão usa a mesma criação idempotente. Um segundo cron chama o worker a cada
+cinco minutos e executa no máximo uma Corrida por chamada; um índice parcial
+impede duas Corridas `RUNNING` para o mesmo CPF. Corridas abandonadas são
+encerradas como `FAILED`. As rotas internas usam `GET` e são protegidas por
+`CRON_SECRET`.
 
 ## Auditoria
 

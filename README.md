@@ -2,8 +2,9 @@
 
 API da plataforma Pico Investimentos, construída com Hono e TypeScript.
 
-Esta versão inclui a fundação HTTP, identidade mínima com sessão em cookie,
-persistência Drizzle/PostgreSQL e o passo 1 da integração B3 (início do opt-in).
+Esta versão inclui identidade com sessão em cookie, persistência
+Drizzle/PostgreSQL e integração B3 para opt-in, confirmação, revogação e
+Sincronização de Posição D-1 assíncrona.
 
 ## Requisitos
 
@@ -33,6 +34,22 @@ POST /api/v1/auth/login
 POST /api/v1/auth/logout
 GET  /api/v1/me
 POST /api/v1/integrations/b3/authorization-attempts
+GET  /api/v1/integrations/b3/connection
+POST /api/v1/integrations/b3/connection/confirmation
+POST /api/v1/integrations/b3/connection/revocation
+POST /api/v1/integrations/b3/syncs
+GET  /api/v1/integrations/b3/syncs/latest
+GET  /api/v1/portfolios/positions?cursor=<uuid>&limit=50
+```
+
+`POST /api/v1/integrations/b3/syncs` responde `202` ao criar uma Corrida
+`PENDING`. O cron diário consulta `last-load-update` e cria um despacho
+paginado; o worker avança seu checkpoint e processa uma Corrida por chamada.
+As duas rotas internas usam `GET` autenticado por `CRON_SECRET`:
+
+```text
+GET /api/v1/internal/b3/daily-position-sync
+GET /api/v1/internal/b3/process-position-syncs
 ```
 
 ## Comandos
@@ -46,6 +63,26 @@ POST /api/v1/integrations/b3/authorization-attempts
 - `npm run db:generate`: gera migrations Drizzle.
 - `npm run db:migrate`: aplica migrations.
 - `npm run db:seed-user`: cria usuário local de teste.
+
+Antes de aplicar `0003_known_vulcan.sql` em uma base existente, verifique CPFs
+duplicados:
+
+```sql
+SELECT cpf, array_agg(id) AS user_ids
+FROM users
+WHERE cpf IS NOT NULL
+GROUP BY cpf
+HAVING count(*) > 1;
+```
+
+Se houver linhas, interrompa o deploy e faça a consolidação aprovada das
+identidades e de seus registros dependentes. A migration falha de propósito e
+não exclui nem escolhe automaticamente uma conta financeira.
+
+Senhas novas usam Argon2id. Login e tentativas de senha na revogação B3 usam
+rate limit persistente no PostgreSQL; respostas bloqueadas incluem
+`Retry-After`. Configure `RATE_LIMIT_KEY_SECRET` com ao menos 32 caracteres em
+produção.
 
 ## Aceite manual do passo 1 (certificação B3)
 

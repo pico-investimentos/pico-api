@@ -7,6 +7,7 @@ export class AppError extends Error {
     readonly status: ContentfulStatusCode,
     readonly code: string,
     message: string,
+    readonly headers: Readonly<Record<string, string>> = {},
   ) {
     super(message)
   }

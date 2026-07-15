@@ -23,6 +23,14 @@ export class InMemoryUserRepository implements UserRepository {
   private readonly users = new Map<string, UserRecord>()
 
   seed(user: UserRecord) {
+    if (
+      user.cpf &&
+      [...this.users.values()].some(
+        (existing) => existing.id !== user.id && existing.cpf === user.cpf,
+      )
+    ) {
+      throw new Error('duplicate user CPF')
+    }
     this.users.set(user.id, user)
   }
 
@@ -36,6 +44,17 @@ export class InMemoryUserRepository implements UserRepository {
         (user) => user.email.toLowerCase() === email.toLowerCase(),
       ) ?? null
     )
+  }
+
+  async updatePasswordHash(input: {
+    id: string
+    passwordHash: string
+  }): Promise<void> {
+    const user = this.users.get(input.id)
+    if (!user) {
+      throw new Error('user not found')
+    }
+    this.users.set(input.id, { ...user, passwordHash: input.passwordHash })
   }
 }
 
@@ -83,6 +102,24 @@ export class InMemoryB3ConnectionRepository implements B3ConnectionRepository {
 
   async findByUserId(userId: string): Promise<B3ConnectionRecord | null> {
     return this.connections.get(userId) ?? null
+  }
+
+  async listUserIdsByStatus(input: {
+    status: B3ConnectionRecord['status']
+    afterUserId?: string
+    limit: number
+  }): Promise<readonly string[]> {
+    return Object.freeze(
+      [...this.connections.values()]
+        .filter(
+          (connection) =>
+            connection.status === input.status &&
+            (!input.afterUserId || connection.userId > input.afterUserId),
+        )
+        .map((connection) => connection.userId)
+        .sort()
+        .slice(0, input.limit),
+    )
   }
 
   async upsertRequested(input: {

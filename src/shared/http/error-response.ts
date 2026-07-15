@@ -61,6 +61,9 @@ export function errorResponse(
   const requestId = c.get('requestId')
 
   if (error instanceof AppError) {
+    for (const [name, value] of Object.entries(error.headers)) {
+      c.header(name, value)
+    }
     return c.json(
       createErrorPayload({ code: error.code, message: error.message }, requestId),
       error.status,

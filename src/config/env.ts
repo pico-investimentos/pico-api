@@ -17,6 +17,7 @@ const rawConfigSchema = z.object({
   POSTGRES_URL_NON_POOLING: z.string().optional(),
   SESSION_COOKIE_NAME: z.string().trim().min(1).default('pico_session'),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(168),
+  RATE_LIMIT_KEY_SECRET: z.string().trim().min(32).optional(),
   B3_ENVIRONMENT: z.enum(['certification', 'production']).optional(),
   B3_OPT_IN_URL: z.string().optional(),
   B3_OPT_IN_ALLOWED_HOSTS: z.string().optional(),
@@ -24,6 +25,9 @@ const rawConfigSchema = z.object({
   B3_SECRETS_DIR: z.string().optional(),
   B3_OAUTH_TOKEN_URL: z.string().optional(),
   B3_OAUTH_SCOPE: z.string().optional(),
+  B3_HTTP_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).optional(),
+  B3_ALLOW_INMEMORY: z.enum(['0', '1']).optional(),
+  CRON_SECRET: z.string().optional(),
 })
 
 const originSchema = z.string().url().transform((value) => new URL(value).origin)
@@ -59,6 +63,8 @@ export type B3Config = Readonly<{
   secretsDir: string | null
   oauthTokenUrl: string
   oauthScope: string
+  httpTimeoutMs: number
+  allowInMemory: boolean
 }>
 
 export type AppConfig = Readonly<{
@@ -70,6 +76,8 @@ export type AppConfig = Readonly<{
   databaseMigrationUrl: string
   sessionCookieName: string
   sessionTtlHours: number
+  rateLimitKeySecret: string
+  cronSecret: string | null
   b3: B3Config
 }>
 
@@ -139,6 +147,8 @@ function parseB3Config(raw: z.infer<typeof rawConfigSchema>): B3Config {
     secretsDir,
     oauthTokenUrl: raw.B3_OAUTH_TOKEN_URL?.trim() || oauthDefaults.tokenUrl,
     oauthScope: raw.B3_OAUTH_SCOPE?.trim() || oauthDefaults.scope,
+    httpTimeoutMs: raw.B3_HTTP_TIMEOUT_MS ?? 30_000,
+    allowInMemory: raw.B3_ALLOW_INMEMORY === '1',
   })
 }
 
@@ -169,6 +179,21 @@ export function loadConfig(
     )
   }
 
+  const rateLimitKeySecret =
+    rawConfig.RATE_LIMIT_KEY_SECRET ??
+    (isTest || rawConfig.NODE_ENV === 'development'
+      ? 'local-rate-limit-key-secret-change-before-production'
+      : undefined)
+  if (!rateLimitKeySecret) {
+    throw new Error('RATE_LIMIT_KEY_SECRET is required in production')
+  }
+  if (
+    rawConfig.NODE_ENV === 'production' &&
+    /change-me|example|local-rate-limit/i.test(rateLimitKeySecret)
+  ) {
+    throw new Error('RATE_LIMIT_KEY_SECRET must not use a placeholder value')
+  }
+
   return Object.freeze({
     nodeEnv: rawConfig.NODE_ENV,
     port: rawConfig.PORT,
@@ -178,6 +203,8 @@ export function loadConfig(
     databaseMigrationUrl,
     sessionCookieName: rawConfig.SESSION_COOKIE_NAME,
     sessionTtlHours: rawConfig.SESSION_TTL_HOURS,
+    rateLimitKeySecret,
+    cronSecret: rawConfig.CRON_SECRET?.trim() || null,
     b3: parseB3Config(rawConfig),
   })
 }

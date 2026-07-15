@@ -8,6 +8,7 @@ import { clearSessionCookie, setSessionCookie } from '../../shared/auth/session-
 import { createRequireAuthenticatedUser } from '../../shared/auth/require-authenticated-user.js'
 import { AppError } from '../../shared/http/app-error.js'
 import type { AppBindings } from '../../shared/http/app-bindings.js'
+import { getClientIp } from '../../shared/http/client-ip.js'
 
 const loginBodySchema = z.object({
   email: z.string().email().max(320),
@@ -40,6 +41,7 @@ export function createIdentityRoutes(dependencies: IdentityRouteDependencies) {
     const result = await dependencies.loginUser.execute({
       email: parsed.data.email,
       password: parsed.data.password,
+      ipAddress: getClientIp((name) => c.req.header(name)),
       now: dependencies.now(),
     })
 

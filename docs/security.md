@@ -13,6 +13,12 @@ dados financeiros reais.
 - Erros internos sem stack trace ou detalhes de infraestrutura para o cliente.
 - Logs de acesso sem query string, payload, token, CPF, saldo ou documento.
 - Validação das variáveis de ambiente no início da aplicação.
+- Senhas novas com Argon2id; hashes scrypt legados são migrados após login
+  válido.
+- Rate limit persistente por conta/usuário e IP no login e na senha de
+  revogação B3, com chaves HMAC e `Retry-After`. A chave HMAC vem de
+  `RATE_LIMIT_KEY_SECRET`, obrigatória em produção.
+- mTLS B3 com timeout, TLS estrito em produção e cache de token por processo.
 
 ## Obrigatório antes das features de negócio
 
@@ -20,7 +26,8 @@ dados financeiros reais.
 - Escolher autenticação com MFA e recuperação de conta segura.
 - Usar sessão em cookie `HttpOnly`, `Secure` e `SameSite` adequado.
 - Implementar autorização no servidor por papel, recurso e vínculo do cliente.
-- Aplicar rate limit em login, recuperação, downloads e ações sensíveis.
+- Estender rate limit para recuperação de conta, downloads e demais ações
+  sensíveis.
 - Registrar trilha de auditoria imutável para o painel administrativo.
 - Criptografar dados em trânsito e em repouso, com rotação de segredos.
 - Definir retenção, exclusão, consentimento e resposta a incidentes segundo LGPD.

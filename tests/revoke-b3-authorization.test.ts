@@ -11,6 +11,7 @@ import {
   InMemoryUserRepository,
 } from '../src/shared/database/memory-repositories.js'
 import { InMemoryB3InvestorAuthorizationClient } from '../src/modules/b3/infrastructure/b3-investor-authorization-client.js'
+import { InMemoryRateLimitRepository } from '../src/shared/database/rate-limit-repositories.js'
 import { testConfig } from './app.test.js'
 
 const now = new Date('2026-07-10T12:00:00.000Z')
@@ -24,6 +25,7 @@ async function createAuthorizedFixture(authorizedInB3: boolean) {
   const attempts = new InMemoryB3AuthorizationAttemptRepository()
   const audit = new InMemoryAuditRepository()
   const unitOfWork = new InMemoryUnitOfWork({ connections, attempts, audit })
+  const rateLimits = new InMemoryRateLimitRepository()
   const b3Client = new InMemoryB3InvestorAuthorizationClient(
     authorizedInB3 ? new Set([cpf]) : new Set(),
   )
@@ -51,7 +53,14 @@ async function createAuthorizedFixture(authorizedInB3: boolean) {
     audit,
     connections,
     b3Client,
-    revoke: new RevokeB3Authorization(users, unitOfWork, b3Client, testConfig.b3),
+    revoke: new RevokeB3Authorization(
+      users,
+      unitOfWork,
+      rateLimits,
+      testConfig.rateLimitKeySecret,
+      b3Client,
+      testConfig.b3,
+    ),
     confirm: new ConfirmB3Authorization(users, unitOfWork, b3Client, testConfig.b3),
   }
 }
@@ -63,6 +72,7 @@ describe('RevokeB3Authorization', () => {
     const result = await revoke.execute({
       userId,
       password,
+      ipAddress: '127.0.0.1',
       requestId: 'req_revoke_1',
       now,
     })
@@ -80,6 +90,7 @@ describe('RevokeB3Authorization', () => {
       revoke.execute({
         userId,
         password: 'wrong-password',
+        ipAddress: '127.0.0.1',
         requestId: 'req_revoke_2',
         now,
       }),
@@ -111,6 +122,7 @@ describe('RevokeB3Authorization', () => {
       revoke.execute({
         userId,
         password,
+        ipAddress: '127.0.0.1',
         requestId: 'req_revoke_limit',
         now,
       }),
@@ -122,6 +134,39 @@ describe('RevokeB3Authorization', () => {
     expect(
       audit.events.some((event) => event.action === 'B3_AUTHORIZATION_REVOCATION_REJECTED'),
     ).toBe(true)
+  })
+
+  it('blocks repeated password guesses before calling B3', async () => {
+    const { revoke, b3Client } = await createAuthorizedFixture(true)
+
+    for (let index = 0; index < 5; index += 1) {
+      await expect(
+        revoke.execute({
+          userId,
+          password: 'wrong-password',
+          ipAddress: '127.0.0.1',
+          requestId: `req_wrong_${index}`,
+          now,
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' })
+    }
+
+    await expect(
+      revoke.execute({
+        userId,
+        password: 'wrong-password',
+        ipAddress: '127.0.0.1',
+        requestId: 'req_wrong_blocked',
+        now,
+      }),
+    ).rejects.toMatchObject({
+      status: 429,
+      code: 'RATE_LIMITED',
+      headers: { 'Retry-After': '1800' },
+    })
+    expect(
+      (await b3Client.findAuthorizationsByDocument(cpf)).authorizedInvestors,
+    ).toHaveLength(1)
   })
 })
 

@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/v1/internal/b3/daily-position-sync",
+      "schedule": "5 2 * * 2-6"
+    },
+    {
+      "path": "/api/v1/internal/b3/process-position-syncs",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
